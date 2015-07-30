@@ -22,7 +22,7 @@ import org.whispersystems.textsecuregcm.auth.AuthenticationCredentials;
 import org.whispersystems.textsecuregcm.entities.SignedPreKey;
 import org.whispersystems.textsecuregcm.util.Util;
 
-import java.io.Serializable;
+import java.util.concurrent.TimeUnit;
 
 public class Device {
 
@@ -30,6 +30,9 @@ public class Device {
 
   @JsonProperty
   private long    id;
+
+  @JsonProperty
+  private String  name;
 
   @JsonProperty
   private String  authToken;
@@ -47,6 +50,12 @@ public class Device {
   private String  apnId;
 
   @JsonProperty
+  private String  voipApnId;
+
+  @JsonProperty
+  private long pushTimestamp;
+
+  @JsonProperty
   private boolean fetchesMessages;
 
   @JsonProperty
@@ -55,22 +64,33 @@ public class Device {
   @JsonProperty
   private SignedPreKey signedPreKey;
 
+  @JsonProperty
+  private long lastSeen;
+
+  @JsonProperty
+  private long created;
+
   public Device() {}
 
-  public Device(long id, String authToken, String salt,
+  public Device(long id, String name, String authToken, String salt,
                 String signalingKey, String gcmId, String apnId,
-                boolean fetchesMessages, int registrationId,
-                SignedPreKey signedPreKey)
+                String voipApnId, boolean fetchesMessages,
+                int registrationId, SignedPreKey signedPreKey,
+                long lastSeen, long created)
   {
     this.id              = id;
+    this.name            = name;
     this.authToken       = authToken;
     this.salt            = salt;
     this.signalingKey    = signalingKey;
     this.gcmId           = gcmId;
     this.apnId           = apnId;
+    this.voipApnId       = voipApnId;
     this.fetchesMessages = fetchesMessages;
     this.registrationId  = registrationId;
     this.signedPreKey    = signedPreKey;
+    this.lastSeen        = lastSeen;
+    this.created         = created;
   }
 
   public String getApnId() {
@@ -79,6 +99,34 @@ public class Device {
 
   public void setApnId(String apnId) {
     this.apnId = apnId;
+
+    if (apnId != null) {
+      this.pushTimestamp = System.currentTimeMillis();
+    }
+  }
+
+  public String getVoipApnId() {
+    return voipApnId;
+  }
+
+  public void setVoipApnId(String voipApnId) {
+    this.voipApnId = voipApnId;
+  }
+
+  public void setLastSeen(long lastSeen) {
+    this.lastSeen = lastSeen;
+  }
+
+  public long getLastSeen() {
+    return lastSeen;
+  }
+
+  public void setCreated(long created) {
+    this.created = created;
+  }
+
+  public long getCreated() {
+    return this.created;
   }
 
   public String getGcmId() {
@@ -87,6 +135,10 @@ public class Device {
 
   public void setGcmId(String gcmId) {
     this.gcmId = gcmId;
+
+    if (gcmId != null) {
+      this.pushTimestamp = System.currentTimeMillis();
+    }
   }
 
   public long getId() {
@@ -95,6 +147,14 @@ public class Device {
 
   public void setId(long id) {
     this.id = id;
+  }
+
+  public String getName() {
+    return name;
+  }
+
+  public void setName(String name) {
+    this.name = name;
   }
 
   public void setAuthenticationCredentials(AuthenticationCredentials credentials) {
@@ -115,7 +175,10 @@ public class Device {
   }
 
   public boolean isActive() {
-    return fetchesMessages || !Util.isEmpty(getApnId()) || !Util.isEmpty(getGcmId());
+    boolean hasChannel = fetchesMessages || !Util.isEmpty(getApnId()) || !Util.isEmpty(getGcmId());
+
+    return (id == MASTER_ID && hasChannel) ||
+           (id != MASTER_ID && hasChannel && signedPreKey != null && lastSeen > (System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)));
   }
 
   public boolean getFetchesMessages() {
@@ -144,5 +207,22 @@ public class Device {
 
   public void setSignedPreKey(SignedPreKey signedPreKey) {
     this.signedPreKey = signedPreKey;
+  }
+
+  public long getPushTimestamp() {
+    return pushTimestamp;
+  }
+
+  @Override
+  public boolean equals(Object other) {
+    if (other == null || !(other instanceof Device)) return false;
+
+    Device that = (Device)other;
+    return this.id == that.id;
+  }
+
+  @Override
+  public int hashCode() {
+    return (int)this.id;
   }
 }

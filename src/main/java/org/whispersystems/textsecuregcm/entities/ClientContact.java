@@ -18,15 +18,10 @@ package org.whispersystems.textsecuregcm.entities;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.annotation.JsonValue;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-import com.google.gson.Gson;
-import org.whispersystems.textsecuregcm.util.Base64;
 import org.whispersystems.textsecuregcm.util.ByteArrayAdapter;
 
-import javax.xml.bind.annotation.XmlRootElement;
-import javax.xml.bind.annotation.adapters.XmlJavaTypeAdapter;
 import java.util.Arrays;
 
 @JsonInclude(JsonInclude.Include.NON_DEFAULT)
@@ -39,12 +34,10 @@ public class ClientContact {
 
   private String  relay;
   private boolean inactive;
-  private boolean supportsSms;
 
-  public ClientContact(byte[] token, String relay, boolean supportsSms) {
-    this.token       = token;
-    this.relay       = relay;
-    this.supportsSms = supportsSms;
+  public ClientContact(byte[] token, String relay) {
+    this.token = token;
+    this.relay = relay;
   }
 
   public ClientContact() {}
@@ -61,10 +54,6 @@ public class ClientContact {
     this.relay = relay;
   }
 
-  public boolean isSupportsSms() {
-    return supportsSms;
-  }
-
   public boolean isInactive() {
     return inactive;
   }
@@ -73,9 +62,9 @@ public class ClientContact {
     this.inactive = inactive;
   }
 
-  public String toString() {
-    return new Gson().toJson(this);
-  }
+//  public String toString() {
+//    return new Gson().toJson(this);
+//  }
 
   @Override
   public boolean equals(Object other) {
@@ -86,7 +75,6 @@ public class ClientContact {
 
     return
         Arrays.equals(this.token, that.token) &&
-        this.supportsSms == that.supportsSms &&
         this.inactive == that.inactive &&
         (this.relay == null ? (that.relay == null) : this.relay.equals(that.relay));
   }

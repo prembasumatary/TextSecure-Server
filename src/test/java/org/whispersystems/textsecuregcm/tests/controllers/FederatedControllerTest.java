@@ -3,11 +3,11 @@ package org.whispersystems.textsecuregcm.tests.controllers;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Optional;
-import com.sun.jersey.api.client.ClientResponse;
-import org.hamcrest.CoreMatchers;
+import org.glassfish.jersey.test.grizzly.GrizzlyWebTestContainerFactory;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
+import org.whispersystems.dropwizard.simpleauth.AuthValueFactoryProvider;
 import org.whispersystems.textsecuregcm.controllers.FederationControllerV1;
 import org.whispersystems.textsecuregcm.controllers.FederationControllerV2;
 import org.whispersystems.textsecuregcm.controllers.KeysControllerV2;
@@ -21,14 +21,19 @@ import org.whispersystems.textsecuregcm.federation.FederatedClientManager;
 import org.whispersystems.textsecuregcm.limits.RateLimiter;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
 import org.whispersystems.textsecuregcm.push.PushSender;
+import org.whispersystems.textsecuregcm.push.ReceiptSender;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
 import org.whispersystems.textsecuregcm.storage.Device;
+import org.whispersystems.textsecuregcm.storage.MessagesManager;
 import org.whispersystems.textsecuregcm.tests.util.AuthHelper;
 
+import javax.ws.rs.client.Entity;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import java.util.HashSet;
 import java.util.LinkedList;
-import java.util.List;
+import java.util.Set;
 
 import io.dropwizard.testing.junit.ResourceTestRule;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -45,8 +50,10 @@ public class FederatedControllerTest {
   private static final String MULTI_DEVICE_RECIPIENT  = "+14152222222";
 
   private PushSender             pushSender             = mock(PushSender.class            );
+  private ReceiptSender          receiptSender          = mock(ReceiptSender.class);
   private FederatedClientManager federatedClientManager = mock(FederatedClientManager.class);
   private AccountsManager        accountsManager        = mock(AccountsManager.class       );
+  private MessagesManager        messagesManager        = mock(MessagesManager.class);
   private RateLimiters           rateLimiters           = mock(RateLimiters.class          );
   private RateLimiter            rateLimiter            = mock(RateLimiter.class           );
 
@@ -55,12 +62,14 @@ public class FederatedControllerTest {
 
   private final ObjectMapper mapper = new ObjectMapper();
 
-  private final MessageController messageController = new MessageController(rateLimiters, pushSender, accountsManager, federatedClientManager);
+  private final MessageController messageController = new MessageController(rateLimiters, pushSender, receiptSender, accountsManager, messagesManager, federatedClientManager);
   private final KeysControllerV2  keysControllerV2  = mock(KeysControllerV2.class);
 
   @Rule
   public final ResourceTestRule resources = ResourceTestRule.builder()
-                                                            .addProvider(AuthHelper.getAuthenticator())
+                                                            .addProvider(AuthHelper.getAuthFilter())
+                                                            .addProvider(new AuthValueFactoryProvider.Binder())
+                                                            .setTestContainerFactory(new GrizzlyWebTestContainerFactory())
                                                             .addResource(new FederationControllerV1(accountsManager, null, messageController, null))
                                                             .addResource(new FederationControllerV2(accountsManager, null, messageController, keysControllerV2))
                                                             .build();
@@ -69,17 +78,17 @@ public class FederatedControllerTest {
 
   @Before
   public void setup() throws Exception {
-    List<Device> singleDeviceList = new LinkedList<Device>() {{
-      add(new Device(1, "foo", "bar", "baz", "isgcm", null, false, 111, null));
+    Set<Device> singleDeviceList = new HashSet<Device>() {{
+      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 111, null, System.currentTimeMillis(), System.currentTimeMillis()));
     }};
 
-    List<Device> multiDeviceList = new LinkedList<Device>() {{
-      add(new Device(1, "foo", "bar", "baz", "isgcm", null, false, 222, null));
-      add(new Device(2, "foo", "bar", "baz", "isgcm", null, false, 333, null));
+    Set<Device> multiDeviceList = new HashSet<Device>() {{
+      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 222, null, System.currentTimeMillis(), System.currentTimeMillis()));
+      add(new Device(2, null, "foo", "bar", "baz", "isgcm", null, null, false, 333, null, System.currentTimeMillis(), System.currentTimeMillis()));
     }};
 
-    Account singleDeviceAccount = new Account(SINGLE_DEVICE_RECIPIENT, false, singleDeviceList);
-    Account multiDeviceAccount  = new Account(MULTI_DEVICE_RECIPIENT, false, multiDeviceList);
+    Account singleDeviceAccount = new Account(SINGLE_DEVICE_RECIPIENT, singleDeviceList);
+    Account multiDeviceAccount  = new Account(MULTI_DEVICE_RECIPIENT, multiDeviceList);
 
     when(accountsManager.get(eq(SINGLE_DEVICE_RECIPIENT))).thenReturn(Optional.of(singleDeviceAccount));
     when(accountsManager.get(eq(MULTI_DEVICE_RECIPIENT))).thenReturn(Optional.of(multiDeviceAccount));
@@ -93,22 +102,25 @@ public class FederatedControllerTest {
 
   @Test
   public void testSingleDeviceCurrent() throws Exception {
-    ClientResponse response =
-        resources.client().resource(String.format("/v1/federation/messages/+14152223333/1/%s", SINGLE_DEVICE_RECIPIENT))
-            .header("Authorization", AuthHelper.getAuthHeader("cyanogen", "foofoo"))
-            .entity(mapper.readValue(jsonFixture("fixtures/current_message_single_device.json"), IncomingMessageList.class))
-            .type(MediaType.APPLICATION_JSON_TYPE)
-            .put(ClientResponse.class);
+    Response response =
+        resources.getJerseyTest()
+                 .target(String.format("/v1/federation/messages/+14152223333/1/%s", SINGLE_DEVICE_RECIPIENT))
+                 .request()
+                 .header("Authorization", AuthHelper.getAuthHeader("cyanogen", "foofoo"))
+                 .put(Entity.entity(mapper.readValue(jsonFixture("fixtures/current_message_single_device.json"), IncomingMessageList.class),
+                                    MediaType.APPLICATION_JSON_TYPE));
 
     assertThat("Good Response", response.getStatus(), is(equalTo(204)));
 
-    verify(pushSender).sendMessage(any(Account.class), any(Device.class), any(MessageProtos.OutgoingMessageSignal.class));
+    verify(pushSender).sendMessage(any(Account.class), any(Device.class), any(MessageProtos.Envelope.class));
   }
 
   @Test
   public void testSignedPreKeyV2() throws Exception {
     PreKeyResponseV2 response =
-        resources.client().resource("/v2/federation/key/+14152223333/1")
+        resources.getJerseyTest()
+                 .target("/v2/federation/key/+14152223333/1")
+                 .request()
                  .header("Authorization", AuthHelper.getAuthHeader("cyanogen", "foofoo"))
                  .get(PreKeyResponseV2.class);
 

@@ -23,21 +23,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.auth.AuthenticationCredentials;
 import org.whispersystems.textsecuregcm.auth.AuthorizationHeader;
+import org.whispersystems.textsecuregcm.auth.AuthorizationToken;
 import org.whispersystems.textsecuregcm.auth.InvalidAuthorizationHeaderException;
 import org.whispersystems.textsecuregcm.entities.AccountAttributes;
 import org.whispersystems.textsecuregcm.entities.ApnRegistrationId;
 import org.whispersystems.textsecuregcm.entities.GcmRegistrationId;
 import org.whispersystems.textsecuregcm.limits.RateLimiters;
+import org.whispersystems.textsecuregcm.providers.TimeProvider;
 import org.whispersystems.textsecuregcm.sms.SmsSender;
 import org.whispersystems.textsecuregcm.sms.TwilioSmsSender;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
 import org.whispersystems.textsecuregcm.storage.Device;
+import org.whispersystems.textsecuregcm.storage.MessagesManager;
 import org.whispersystems.textsecuregcm.storage.PendingAccountsManager;
-import org.whispersystems.textsecuregcm.storage.StoredMessages;
 import org.whispersystems.textsecuregcm.util.Util;
 import org.whispersystems.textsecuregcm.util.VerificationCode;
-import org.whispersystems.textsecuregcm.websocket.WebsocketAddress;
 
 import javax.validation.Valid;
 import javax.ws.rs.Consumes;
@@ -55,6 +56,7 @@ import javax.ws.rs.core.Response;
 import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.Map;
 
 import io.dropwizard.auth.Auth;
 
@@ -67,19 +69,28 @@ public class AccountController {
   private final AccountsManager        accounts;
   private final RateLimiters           rateLimiters;
   private final SmsSender              smsSender;
-  private final StoredMessages         storedMessages;
+  private final MessagesManager        messagesManager;
+  private final TimeProvider           timeProvider;
+  private final Optional<byte[]>       authorizationKey;
+  private final Map<String, Integer>   testDevices;
 
   public AccountController(PendingAccountsManager pendingAccounts,
                            AccountsManager accounts,
                            RateLimiters rateLimiters,
                            SmsSender smsSenderFactory,
-                           StoredMessages storedMessages)
+                           MessagesManager messagesManager,
+                           TimeProvider timeProvider,
+                           Optional<byte[]> authorizationKey,
+                           Map<String, Integer> testDevices)
   {
-    this.pendingAccounts = pendingAccounts;
-    this.accounts        = accounts;
-    this.rateLimiters    = rateLimiters;
-    this.smsSender       = smsSenderFactory;
-    this.storedMessages  = storedMessages;
+    this.pendingAccounts  = pendingAccounts;
+    this.accounts         = accounts;
+    this.rateLimiters     = rateLimiters;
+    this.smsSender        = smsSenderFactory;
+    this.messagesManager  = messagesManager;
+    this.timeProvider     = timeProvider;
+    this.authorizationKey = authorizationKey;
+    this.testDevices      = testDevices;
   }
 
   @Timed
@@ -105,10 +116,12 @@ public class AccountController {
         throw new WebApplicationException(Response.status(422).build());
     }
 
-    VerificationCode verificationCode = generateVerificationCode();
+    VerificationCode verificationCode = generateVerificationCode(number);
     pendingAccounts.store(number, verificationCode.getVerificationCode());
 
-    if (transport.equals("sms")) {
+    if (testDevices.containsKey(number)) {
+      // noop
+    } else if (transport.equals("sms")) {
       smsSender.deliverSmsVerification(number, verificationCode.getVerificationCodeDisplay());
     } else if (transport.equals("voice")) {
       smsSender.deliverVoxVerification(number, verificationCode.getVerificationCodeSpeech());
@@ -145,39 +158,60 @@ public class AccountController {
         throw new WebApplicationException(Response.status(417).build());
       }
 
-      Device device = new Device();
-      device.setId(Device.MASTER_ID);
-      device.setAuthenticationCredentials(new AuthenticationCredentials(password));
-      device.setSignalingKey(accountAttributes.getSignalingKey());
-      device.setFetchesMessages(accountAttributes.getFetchesMessages());
-      device.setRegistrationId(accountAttributes.getRegistrationId());
-
-      Account account = new Account();
-      account.setNumber(number);
-      account.setSupportsSms(accountAttributes.getSupportsSms());
-      account.addDevice(device);
-
-      accounts.create(account);
-      storedMessages.clear(new WebsocketAddress(number, Device.MASTER_ID));
-      pendingAccounts.remove(number);
-
-      logger.debug("Stored device...");
+      createAccount(number, password, accountAttributes);
     } catch (InvalidAuthorizationHeaderException e) {
       logger.info("Bad Authorization Header", e);
       throw new WebApplicationException(Response.status(401).build());
     }
   }
 
+  @Timed
+  @PUT
+  @Consumes(MediaType.APPLICATION_JSON)
+  @Path("/token/{verification_token}")
+  public void verifyToken(@PathParam("verification_token") String verificationToken,
+                          @HeaderParam("Authorization")    String authorizationHeader,
+                          @Valid                           AccountAttributes accountAttributes)
+      throws RateLimitExceededException
+  {
+    try {
+      AuthorizationHeader header   = AuthorizationHeader.fromFullHeader(authorizationHeader);
+      String              number   = header.getNumber();
+      String              password = header.getPassword();
 
+      rateLimiters.getVerifyLimiter().validate(number);
+
+      if (!authorizationKey.isPresent()) {
+        logger.debug("Attempt to authorize with key but not configured...");
+        throw new WebApplicationException(Response.status(403).build());
+      }
+
+      AuthorizationToken token = new AuthorizationToken(verificationToken, authorizationKey.get());
+
+      if (!token.isValid(number, timeProvider.getCurrentTimeMillis())) {
+        throw new WebApplicationException(Response.status(403).build());
+      }
+
+      createAccount(number, password, accountAttributes);
+    } catch (InvalidAuthorizationHeaderException e) {
+      logger.info("Bad authorization header", e);
+      throw new WebApplicationException(Response.status(401).build());
+    }
+  }
 
   @Timed
   @PUT
   @Path("/gcm/")
   @Consumes(MediaType.APPLICATION_JSON)
-  public void setGcmRegistrationId(@Auth Account account, @Valid GcmRegistrationId registrationId)  {
+  public void setGcmRegistrationId(@Auth Account account, @Valid GcmRegistrationId registrationId) {
     Device device = account.getAuthenticatedDevice().get();
     device.setApnId(null);
+    device.setVoipApnId(null);
     device.setGcmId(registrationId.getGcmRegistrationId());
+
+    if (registrationId.isWebSocketChannel()) device.setFetchesMessages(true);
+    else                                     device.setFetchesMessages(false);
+
     accounts.update(account);
   }
 
@@ -187,6 +221,7 @@ public class AccountController {
   public void deleteGcmRegistrationId(@Auth Account account) {
     Device device = account.getAuthenticatedDevice().get();
     device.setGcmId(null);
+    device.setFetchesMessages(false);
     accounts.update(account);
   }
 
@@ -197,7 +232,9 @@ public class AccountController {
   public void setApnRegistrationId(@Auth Account account, @Valid ApnRegistrationId registrationId) {
     Device device = account.getAuthenticatedDevice().get();
     device.setApnId(registrationId.getApnRegistrationId());
+    device.setVoipApnId(registrationId.getVoipRegistrationId());
     device.setGcmId(null);
+    device.setFetchesMessages(true);
     accounts.update(account);
   }
 
@@ -207,6 +244,25 @@ public class AccountController {
   public void deleteApnRegistrationId(@Auth Account account) {
     Device device = account.getAuthenticatedDevice().get();
     device.setApnId(null);
+    device.setFetchesMessages(false);
+    accounts.update(account);
+  }
+
+  @Timed
+  @PUT
+  @Path("/wsc/")
+  public void setWebSocketChannelSupported(@Auth Account account) {
+    Device device = account.getAuthenticatedDevice().get();
+    device.setFetchesMessages(true);
+    accounts.update(account);
+  }
+
+  @Timed
+  @DELETE
+  @Path("/wsc/")
+  public void deleteWebSocketChannel(@Auth Account account) {
+    Device device = account.getAuthenticatedDevice().get();
+    device.setFetchesMessages(false);
     accounts.update(account);
   }
 
@@ -219,8 +275,34 @@ public class AccountController {
         encodedVerificationText)).build();
   }
 
-  @VisibleForTesting protected VerificationCode generateVerificationCode() {
+  private void createAccount(String number, String password, AccountAttributes accountAttributes) {
+    Device device = new Device();
+    device.setId(Device.MASTER_ID);
+    device.setAuthenticationCredentials(new AuthenticationCredentials(password));
+    device.setSignalingKey(accountAttributes.getSignalingKey());
+    device.setFetchesMessages(accountAttributes.getFetchesMessages());
+    device.setRegistrationId(accountAttributes.getRegistrationId());
+    device.setName(accountAttributes.getName());
+    device.setCreated(System.currentTimeMillis());
+    device.setLastSeen(Util.todayInMillis());
+
+    Account account = new Account();
+    account.setNumber(number);
+    account.addDevice(device);
+
+    accounts.create(account);
+    messagesManager.clear(number);
+    pendingAccounts.remove(number);
+
+    logger.debug("Stored device...");
+  }
+
+  @VisibleForTesting protected VerificationCode generateVerificationCode(String number) {
     try {
+      if (testDevices.containsKey(number)) {
+        return new VerificationCode(testDevices.get(number));
+      }
+
       SecureRandom random = SecureRandom.getInstance("SHA1PRNG");
       int randomInt       = 100000 + random.nextInt(900000);
       return new VerificationCode(randomInt);

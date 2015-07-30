@@ -18,7 +18,7 @@ package org.whispersystems.textsecuregcm.entities;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.whispersystems.textsecuregcm.entities.MessageProtos.OutgoingMessageSignal;
+import org.whispersystems.textsecuregcm.entities.MessageProtos.Envelope;
 import org.whispersystems.textsecuregcm.util.Base64;
 import org.whispersystems.textsecuregcm.util.Util;
 
@@ -41,21 +41,25 @@ public class EncryptedOutgoingMessage {
   private static final int    MAC_KEY_SIZE    = 20;
   private static final int    MAC_SIZE        = 10;
 
-  private final String serialized;
+  private final byte[] serialized;
+  private final String serializedAndEncoded;
 
-  public EncryptedOutgoingMessage(OutgoingMessageSignal outgoingMessage,
-                                  String signalingKey)
+  public EncryptedOutgoingMessage(Envelope outgoingMessage, String signalingKey)
       throws CryptoEncodingException
   {
     byte[]        plaintext  = outgoingMessage.toByteArray();
     SecretKeySpec cipherKey  = getCipherKey (signalingKey);
     SecretKeySpec macKey     = getMacKey(signalingKey);
-    byte[]        ciphertext = getCiphertext(plaintext, cipherKey, macKey);
 
-    this.serialized = Base64.encodeBytes(ciphertext);
+    this.serialized           = getCiphertext(plaintext, cipherKey, macKey);
+    this.serializedAndEncoded = Base64.encodeBytes(this.serialized);
   }
 
-  public String serialize() {
+  public String toEncodedString() {
+    return serializedAndEncoded;
+  }
+
+  public byte[] toByteArray() {
     return serialized;
   }
 

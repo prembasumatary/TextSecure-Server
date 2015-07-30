@@ -29,6 +29,7 @@ import org.whispersystems.textsecuregcm.storage.DirectoryManager.BatchOperationH
 import org.whispersystems.textsecuregcm.util.Base64;
 import org.whispersystems.textsecuregcm.util.Util;
 
+import java.io.IOException;
 import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
@@ -36,6 +37,8 @@ import java.util.List;
 import static org.whispersystems.textsecuregcm.storage.DirectoryManager.PendingClientContact;
 
 public class DirectoryUpdater {
+
+  private static final int CHUNK_SIZE = 10000;
 
   private final Logger logger = LoggerFactory.getLogger(DirectoryUpdater.class);
 
@@ -53,33 +56,40 @@ public class DirectoryUpdater {
   }
 
   public void updateFromLocalDatabase() {
-    BatchOperationHandle batchOperation = directory.startBatchOperation();
+    int                  contactsAdded   = 0;
+    int                  contactsRemoved = 0;
+    BatchOperationHandle batchOperation  = directory.startBatchOperation();
 
     try {
-      Iterator<Account> accounts = accountsManager.getAll();
+      logger.info("Updating from local DB.");
+      int offset = 0;
 
-      if (accounts == null)
-        return;
+      for (;;) {
+        List<Account> accounts = accountsManager.getAll(offset, CHUNK_SIZE);
 
-      while (accounts.hasNext()) {
-        Account account = accounts.next();
+        if (accounts == null || accounts.isEmpty()) break;
+        else                                        offset += accounts.size();
 
-        if (account.isActive()) {
-          byte[]        token         = Util.getContactToken(account.getNumber());
-          ClientContact clientContact = new ClientContact(token, null, account.getSupportsSms());
+        for (Account account : accounts) {
+          if (account.isActive()) {
+            byte[]        token         = Util.getContactToken(account.getNumber());
+            ClientContact clientContact = new ClientContact(token, null);
 
-          directory.add(batchOperation, clientContact);
-
-          logger.debug("Adding local token: " + Base64.encodeBytesWithoutPadding(token));
-        } else {
-          directory.remove(batchOperation, account.getNumber());
+            directory.add(batchOperation, clientContact);
+            contactsAdded++;
+          } else {
+            directory.remove(batchOperation, account.getNumber());
+            contactsRemoved++;
+          }
         }
+
+        logger.info("Processed " + CHUNK_SIZE + " local accounts...");
       }
     } finally {
       directory.stopBatchOperation(batchOperation);
     }
 
-    logger.info("Local directory is updated.");
+    logger.info(String.format("Local directory is updated (%d added, %d removed).", contactsAdded, contactsRemoved));
   }
 
   public void updateFromPeers() {
@@ -121,19 +131,23 @@ public class DirectoryUpdater {
         Iterator<PendingClientContact> localContactIterator  = localContacts.iterator();
 
         while (remoteContactIterator.hasNext() && localContactIterator.hasNext()) {
-          ClientContact           remoteContact = remoteContactIterator.next();
-          Optional<ClientContact> localContact  = localContactIterator.next().get();
+          try {
+            ClientContact           remoteContact = remoteContactIterator.next();
+            Optional<ClientContact> localContact  = localContactIterator.next().get();
 
-          remoteContact.setRelay(client.getPeerName());
+            remoteContact.setRelay(client.getPeerName());
 
-          if (!remoteContact.isInactive() && (!localContact.isPresent() || client.getPeerName().equals(localContact.get().getRelay()))) {
-            contactsAdded++;
-            directory.add(handle, remoteContact);
-          } else {
-            if (localContact.isPresent() && client.getPeerName().equals(localContact.get().getRelay())) {
-              contactsRemoved++;
-              directory.remove(handle, remoteContact.getToken());
+            if (!remoteContact.isInactive() && (!localContact.isPresent() || client.getPeerName().equals(localContact.get().getRelay()))) {
+              contactsAdded++;
+              directory.add(handle, remoteContact);
+            } else {
+              if (localContact.isPresent() && client.getPeerName().equals(localContact.get().getRelay())) {
+                contactsRemoved++;
+                directory.remove(handle, remoteContact.getToken());
+              }
             }
+          } catch (IOException e) {
+            logger.warn("JSON Serialization Failed: ", e);
           }
         }
 
