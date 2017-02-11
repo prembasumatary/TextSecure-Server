@@ -1,5 +1,8 @@
 package org.whispersystems.textsecuregcm.websocket;
 
+import com.codahale.metrics.Histogram;
+import com.codahale.metrics.MetricRegistry;
+import com.codahale.metrics.SharedMetricRegistries;
 import com.google.common.base.Optional;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
@@ -9,10 +12,12 @@ import com.google.protobuf.InvalidProtocolBufferException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.whispersystems.dispatch.DispatchChannel;
+import org.whispersystems.textsecuregcm.controllers.MessageController;
 import org.whispersystems.textsecuregcm.controllers.NoSuchUserException;
 import org.whispersystems.textsecuregcm.entities.CryptoEncodingException;
 import org.whispersystems.textsecuregcm.entities.EncryptedOutgoingMessage;
 import org.whispersystems.textsecuregcm.entities.OutgoingMessageEntity;
+import org.whispersystems.textsecuregcm.entities.OutgoingMessageEntityList;
 import org.whispersystems.textsecuregcm.push.NotPushRegisteredException;
 import org.whispersystems.textsecuregcm.push.PushSender;
 import org.whispersystems.textsecuregcm.push.ReceiptSender;
@@ -20,6 +25,7 @@ import org.whispersystems.textsecuregcm.push.TransientPushFailureException;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.Device;
 import org.whispersystems.textsecuregcm.storage.MessagesManager;
+import org.whispersystems.textsecuregcm.util.Constants;
 import org.whispersystems.websocket.WebSocketClient;
 import org.whispersystems.websocket.messages.WebSocketResponseMessage;
 
@@ -27,12 +33,16 @@ import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 import javax.ws.rs.WebApplicationException;
 import java.io.IOException;
-import java.util.List;
+import java.util.Iterator;
 
+import static com.codahale.metrics.MetricRegistry.name;
 import static org.whispersystems.textsecuregcm.entities.MessageProtos.Envelope;
 import static org.whispersystems.textsecuregcm.storage.PubSubProtos.PubSubMessage;
 
 public class WebSocketConnection implements DispatchChannel {
+
+  private static final MetricRegistry metricRegistry = SharedMetricRegistries.getOrCreate(Constants.METRICS_NAME);
+  public  static final Histogram      messageTime    = metricRegistry.histogram(name(MessageController.class, "message_delivery_duration"));
 
   private static final Logger logger = LoggerFactory.getLogger(WebSocketConnection.class);
 
@@ -69,7 +79,7 @@ public class WebSocketConnection implements DispatchChannel {
           processStoredMessages();
           break;
         case PubSubMessage.Type.DELIVER_VALUE:
-          sendMessage(Envelope.parseFrom(pubSubMessage.getContent()), Optional.<Long>absent());
+          sendMessage(Envelope.parseFrom(pubSubMessage.getContent()), Optional.<Long>absent(), false);
           break;
         default:
           logger.warn("Unknown pubsub message: " + pubSubMessage.getType().getNumber());
@@ -88,22 +98,28 @@ public class WebSocketConnection implements DispatchChannel {
     processStoredMessages();
   }
 
-  private void sendMessage(final Envelope message,
-                           final Optional<Long> storedMessageId)
+  private void sendMessage(final Envelope       message,
+                           final Optional<Long> storedMessageId,
+                           final boolean        requery)
   {
     try {
       EncryptedOutgoingMessage                   encryptedMessage = new EncryptedOutgoingMessage(message, device.getSignalingKey());
       Optional<byte[]>                           body             = Optional.fromNullable(encryptedMessage.toByteArray());
-      ListenableFuture<WebSocketResponseMessage> response         = client.sendRequest("PUT", "/api/v1/message", body);
+      ListenableFuture<WebSocketResponseMessage> response         = client.sendRequest("PUT", "/api/v1/message", null, body);
 
       Futures.addCallback(response, new FutureCallback<WebSocketResponseMessage>() {
         @Override
         public void onSuccess(@Nullable WebSocketResponseMessage response) {
           boolean isReceipt = message.getType() == Envelope.Type.RECEIPT;
 
+          if (isSuccessResponse(response) && !isReceipt) {
+            messageTime.update(System.currentTimeMillis() - message.getTimestamp());
+          }
+
           if (isSuccessResponse(response)) {
             if (storedMessageId.isPresent()) messagesManager.delete(account.getNumber(), storedMessageId.get());
             if (!isReceipt)                  sendDeliveryReceiptFor(message);
+            if (requery)                     processStoredMessages();
           } else if (!isSuccessResponse(response) && !storedMessageId.isPresent()) {
             requeueMessage(message);
           }
@@ -124,11 +140,13 @@ public class WebSocketConnection implements DispatchChannel {
   }
 
   private void requeueMessage(Envelope message) {
+    int     queueDepth = pushSender.getWebSocketSender().queueMessage(account, device, message);
+    boolean fallback   = !message.getSource().equals(account.getNumber());
+
     try {
-      pushSender.sendMessage(account, device, message);
+      pushSender.sendQueuedNotification(account, device, queueDepth, fallback);
     } catch (NotPushRegisteredException | TransientPushFailureException e) {
       logger.warn("requeueMessage", e);
-      messagesManager.insert(account.getNumber(), device.getId(), message);
     }
   }
 
@@ -137,22 +155,26 @@ public class WebSocketConnection implements DispatchChannel {
       receiptSender.sendReceipt(account, message.getSource(), message.getTimestamp(),
                                 message.hasRelay() ? Optional.of(message.getRelay()) :
                                                      Optional.<String>absent());
-    } catch (IOException | NoSuchUserException | TransientPushFailureException | NotPushRegisteredException  e) {
-      logger.warn("sendDeliveryReceiptFor", e);
+    } catch (NoSuchUserException | NotPushRegisteredException  e) {
+      logger.info("No longer registered " + e.getMessage());
+    } catch(IOException | TransientPushFailureException e) {
+      logger.warn("Something wrong while sending receipt", e);
     } catch (WebApplicationException e) {
       logger.warn("Bad federated response for receipt: " + e.getResponse().getStatus());
     }
   }
 
   private void processStoredMessages() {
-    List<OutgoingMessageEntity> messages = messagesManager.getMessagesForDevice(account.getNumber(), device.getId());
+    OutgoingMessageEntityList       messages = messagesManager.getMessagesForDevice(account.getNumber(), device.getId());
+    Iterator<OutgoingMessageEntity> iterator = messages.getMessages().iterator();
 
-    for (OutgoingMessageEntity message : messages) {
-      Envelope.Builder builder = Envelope.newBuilder()
-                                         .setType(Envelope.Type.valueOf(message.getType()))
-                                         .setSourceDevice(message.getSourceDevice())
-                                         .setSource(message.getSource())
-                                         .setTimestamp(message.getTimestamp());
+    while (iterator.hasNext()) {
+      OutgoingMessageEntity message = iterator.next();
+      Envelope.Builder      builder = Envelope.newBuilder()
+                                              .setType(Envelope.Type.valueOf(message.getType()))
+                                              .setSourceDevice(message.getSourceDevice())
+                                              .setSource(message.getSource())
+                                              .setTimestamp(message.getTimestamp());
 
       if (message.getMessage() != null) {
         builder.setLegacyMessage(ByteString.copyFrom(message.getMessage()));
@@ -166,9 +188,7 @@ public class WebSocketConnection implements DispatchChannel {
         builder.setRelay(message.getRelay());
       }
 
-      sendMessage(builder.build(), Optional.of(message.getId()));
+      sendMessage(builder.build(), Optional.of(message.getId()), !iterator.hasNext() && messages.hasMore());
     }
   }
-
-
 }

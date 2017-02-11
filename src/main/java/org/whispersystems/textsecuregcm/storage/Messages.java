@@ -24,6 +24,8 @@ import java.util.List;
 
 public abstract class Messages {
 
+  public static final int RESULT_SET_CHUNK_SIZE = 100;
+
   private static final String ID                 = "id";
   private static final String TYPE               = "type";
   private static final String RELAY              = "relay";
@@ -43,13 +45,16 @@ public abstract class Messages {
                      @Bind("destination_device") long destinationDevice);
 
   @Mapper(MessageMapper.class)
-  @SqlQuery("SELECT * FROM messages WHERE " + DESTINATION + " = :destination AND " + DESTINATION_DEVICE + " = :destination_device ORDER BY " + TIMESTAMP + " ASC")
+  @SqlQuery("SELECT * FROM messages WHERE " + DESTINATION + " = :destination AND " + DESTINATION_DEVICE + " = :destination_device  ORDER BY " + TIMESTAMP + " ASC LIMIT " + RESULT_SET_CHUNK_SIZE)
   abstract List<OutgoingMessageEntity> load(@Bind("destination")        String destination,
                                             @Bind("destination_device") long destinationDevice);
 
   @Mapper(MessageMapper.class)
-  @SqlQuery("DELETE FROM messages WHERE " + ID + " IN (SELECT " + ID + " FROM messages WHERE " + DESTINATION + " = :destination AND " + SOURCE + " = :source AND " + TIMESTAMP + " = :timestamp ORDER BY " + ID + " LIMIT 1) RETURNING *")
-  abstract OutgoingMessageEntity remove(@Bind("destination") String destination, @Bind("source") String source, @Bind("timestamp") long timestamp);
+  @SqlQuery("DELETE FROM messages WHERE " + ID + " IN (SELECT " + ID + " FROM messages WHERE " + DESTINATION + " = :destination AND " + DESTINATION_DEVICE + " = :destination_device AND " + SOURCE + " = :source AND " + TIMESTAMP + " = :timestamp ORDER BY " + ID + " LIMIT 1) RETURNING *")
+  abstract OutgoingMessageEntity remove(@Bind("destination")        String destination,
+                                        @Bind("destination_device") long destinationDevice,
+                                        @Bind("source")             String source,
+                                        @Bind("timestamp")          long timestamp);
 
   @Mapper(MessageMapper.class)
   @SqlUpdate("DELETE FROM messages WHERE " + ID + " = :id AND " + DESTINATION + " = :destination")
@@ -57,6 +62,12 @@ public abstract class Messages {
 
   @SqlUpdate("DELETE FROM messages WHERE " + DESTINATION + " = :destination")
   abstract void clear(@Bind("destination") String destination);
+
+  @SqlUpdate("DELETE FROM messages WHERE " + DESTINATION + " = :destination AND " + DESTINATION_DEVICE + " = :destination_device")
+  abstract void clear(@Bind("destination") String destination, @Bind("destination_device") long destinationDevice);
+
+  @SqlUpdate("DELETE FROM messages WHERE " + TIMESTAMP + " < :timestamp")
+  public abstract void removeOld(@Bind("timestamp") long timestamp);
 
   @SqlUpdate("VACUUM messages")
   public abstract void vacuum();

@@ -19,19 +19,18 @@ package org.whispersystems.textsecuregcm;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.whispersystems.textsecuregcm.configuration.FederationConfiguration;
 import org.whispersystems.textsecuregcm.configuration.GraphiteConfiguration;
-import org.whispersystems.textsecuregcm.configuration.NexmoConfiguration;
 import org.whispersystems.textsecuregcm.configuration.PushConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RateLimitsConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RedPhoneConfiguration;
 import org.whispersystems.textsecuregcm.configuration.RedisConfiguration;
 import org.whispersystems.textsecuregcm.configuration.S3Configuration;
 import org.whispersystems.textsecuregcm.configuration.TestDeviceConfiguration;
+import org.whispersystems.textsecuregcm.configuration.TurnConfiguration;
 import org.whispersystems.textsecuregcm.configuration.TwilioConfiguration;
 import org.whispersystems.textsecuregcm.configuration.WebsocketConfiguration;
 
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
-
 import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
@@ -47,9 +46,6 @@ public class WhisperServerConfiguration extends Configuration {
   @Valid
   @JsonProperty
   private TwilioConfiguration twilio;
-
-  @JsonProperty
-  private NexmoConfiguration nexmo;
 
   @NotNull
   @Valid
@@ -90,14 +86,13 @@ public class WhisperServerConfiguration extends Configuration {
   @JsonProperty
   private DataSourceFactory database = new DataSourceFactory();
 
+  @JsonProperty
+  private DataSourceFactory read_database;
+
   @Valid
   @NotNull
   @JsonProperty
   private RateLimitsConfiguration limits = new RateLimitsConfiguration();
-
-  @Valid
-  @JsonProperty
-  private GraphiteConfiguration graphite = new GraphiteConfiguration();
 
   @Valid
   @JsonProperty
@@ -111,6 +106,11 @@ public class WhisperServerConfiguration extends Configuration {
   @JsonProperty
   private JerseyClientConfiguration httpClient = new JerseyClientConfiguration();
 
+  @Valid
+  @NotNull
+  @JsonProperty
+  private TurnConfiguration turn;
+
 
   public WebsocketConfiguration getWebsocketConfiguration() {
     return websocket;
@@ -118,10 +118,6 @@ public class WhisperServerConfiguration extends Configuration {
 
   public TwilioConfiguration getTwilioConfiguration() {
     return twilio;
-  }
-
-  public NexmoConfiguration getNexmoConfiguration() {
-    return nexmo;
   }
 
   public PushConfiguration getPushConfiguration() {
@@ -152,6 +148,10 @@ public class WhisperServerConfiguration extends Configuration {
     return database;
   }
 
+  public DataSourceFactory getReadDataSourceFactory() {
+    return read_database;
+  }
+
   public RateLimitsConfiguration getLimitsConfiguration() {
     return limits;
   }
@@ -160,12 +160,12 @@ public class WhisperServerConfiguration extends Configuration {
     return federation;
   }
 
-  public GraphiteConfiguration getGraphiteConfiguration() {
-    return graphite;
-  }
-
   public RedPhoneConfiguration getRedphoneConfiguration() {
     return redphone;
+  }
+
+  public TurnConfiguration getTurnConfiguration() {
+    return turn;
   }
 
   public Map<String, Integer> getTestDevices() {

@@ -8,7 +8,6 @@ import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
 import org.whispersystems.textsecuregcm.storage.Device;
 
-import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,9 +44,14 @@ public class FeedbackHandler implements Managed, Runnable {
 
   @Override
   public void run() {
+    logger.info("Checking Push Server feedback...");
+
     try {
       List<UnregisteredEvent> gcmFeedback = client.getGcmFeedback();
       List<UnregisteredEvent> apnFeedback = client.getApnFeedback();
+
+      logger.info("Got GCM feedback: " + gcmFeedback.size());
+      logger.info("Got APN feedback: " + apnFeedback.size());
 
       for (UnregisteredEvent gcmEvent : gcmFeedback) {
         handleGcmUnregistered(gcmEvent);
@@ -56,8 +60,8 @@ public class FeedbackHandler implements Managed, Runnable {
       for (UnregisteredEvent apnEvent : apnFeedback) {
         handleApnUnregistered(apnEvent);
       }
-    } catch (IOException e) {
-      logger.warn("Error retrieving feedback: ", e);
+    } catch (Throwable t) {
+      logger.warn("Error retrieving feedback: ", t);
     }
   }
 
@@ -73,7 +77,7 @@ public class FeedbackHandler implements Managed, Runnable {
         if (event.getRegistrationId().equals(device.get().getGcmId())) {
           logger.info("GCM Unregister GCM ID matches!");
           if (device.get().getPushTimestamp() == 0 ||
-              event.getTimestamp() > device.get().getPushTimestamp())
+              event.getTimestamp() > (device.get().getPushTimestamp() + TimeUnit.SECONDS.toMillis(10)))
           {
             logger.info("GCM Unregister Timestamp matches!");
 
@@ -82,6 +86,7 @@ public class FeedbackHandler implements Managed, Runnable {
               device.get().setGcmId(event.getCanonicalId());
             } else {
               device.get().setGcmId(null);
+              device.get().setFetchesMessages(false);
             }
             accountsManager.update(account.get());
           }

@@ -24,6 +24,7 @@ import com.google.common.base.Optional;
 
 import java.util.HashSet;
 import java.util.Set;
+import java.util.concurrent.TimeUnit;
 
 public class Account {
 
@@ -71,7 +72,7 @@ public class Account {
   }
 
   public void removeDevice(long deviceId) {
-    this.devices.remove(new Device(deviceId, null, null, null, null, null, null, null, false, 0, null, 0, 0));
+    this.devices.remove(new Device(deviceId, null, null, null, null, null, null, null, false, 0, null, 0, 0, false, false, "NA"));
   }
 
   public Set<Device> getDevices() {
@@ -92,10 +93,31 @@ public class Account {
     return Optional.absent();
   }
 
+  public boolean isVoiceSupported() {
+    for (Device device : devices) {
+      if (device.isActive() && device.isVoiceSupported()) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public boolean isVideoSupported() {
+    for (Device device : devices) {
+      if (device.isActive() && device.isVideoSupported()) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   public boolean isActive() {
     return
         getMasterDevice().isPresent() &&
-        getMasterDevice().get().isActive();
+        getMasterDevice().get().isActive() &&
+        getLastSeen() > (System.currentTimeMillis() - TimeUnit.DAYS.toMillis(365));
   }
 
   public long getNextDeviceId() {
@@ -136,5 +158,17 @@ public class Account {
 
   public String getIdentityKey() {
     return identityKey;
+  }
+
+  public long getLastSeen() {
+    long lastSeen = 0;
+
+    for (Device device : devices) {
+      if (device.getLastSeen() > lastSeen) {
+        lastSeen = device.getLastSeen();
+      }
+    }
+
+    return lastSeen;
   }
 }

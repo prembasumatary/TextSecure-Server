@@ -32,12 +32,20 @@ public class ClientContact {
   @JsonProperty
   private byte[]  token;
 
+  @JsonProperty
+  private boolean voice;
+
+  @JsonProperty
+  private boolean video;
+
   private String  relay;
   private boolean inactive;
 
-  public ClientContact(byte[] token, String relay) {
+  public ClientContact(byte[] token, String relay, boolean voice, boolean video) {
     this.token = token;
     this.relay = relay;
+    this.voice = voice;
+    this.video = video;
   }
 
   public ClientContact() {}
@@ -62,9 +70,21 @@ public class ClientContact {
     this.inactive = inactive;
   }
 
-//  public String toString() {
-//    return new Gson().toJson(this);
-//  }
+  public boolean isVoice() {
+    return voice;
+  }
+
+  public void setVoice(boolean voice) {
+    this.voice = voice;
+  }
+
+  public boolean isVideo() {
+    return video;
+  }
+
+  public void setVideo(boolean video) {
+    this.video = video;
+  }
 
   @Override
   public boolean equals(Object other) {
@@ -76,6 +96,8 @@ public class ClientContact {
     return
         Arrays.equals(this.token, that.token) &&
         this.inactive == that.inactive &&
+        this.voice == that.voice &&
+        this.video == that.video &&
         (this.relay == null ? (that.relay == null) : this.relay.equals(that.relay));
   }
 

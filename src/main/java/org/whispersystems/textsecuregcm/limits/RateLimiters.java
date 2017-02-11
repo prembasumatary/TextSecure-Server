@@ -25,6 +25,7 @@ public class RateLimiters {
 
   private final RateLimiter smsDestinationLimiter;
   private final RateLimiter voiceDestinationLimiter;
+  private final RateLimiter voiceDestinationDailyLimiter;
   private final RateLimiter verifyLimiter;
 
   private final RateLimiter attachmentLimiter;
@@ -35,6 +36,8 @@ public class RateLimiters {
   private final RateLimiter allocateDeviceLimiter;
   private final RateLimiter verifyDeviceLimiter;
 
+  private final RateLimiter turnLimiter;
+
   public RateLimiters(RateLimitsConfiguration config, JedisPool cacheClient) {
     this.smsDestinationLimiter = new RateLimiter(cacheClient, "smsDestination",
                                                  config.getSmsDestination().getBucketSize(),
@@ -43,6 +46,10 @@ public class RateLimiters {
     this.voiceDestinationLimiter = new RateLimiter(cacheClient, "voxDestination",
                                                    config.getVoiceDestination().getBucketSize(),
                                                    config.getVoiceDestination().getLeakRatePerMinute());
+
+    this.voiceDestinationDailyLimiter = new RateLimiter(cacheClient, "voxDestinationDaily",
+                                                        config.getVoiceDestinationDaily().getBucketSize(),
+                                                        config.getVoiceDestinationDaily().getLeakRatePerMinute());
 
     this.verifyLimiter = new RateLimiter(cacheClient, "verify",
                                          config.getVerifyNumber().getBucketSize(),
@@ -72,6 +79,9 @@ public class RateLimiters {
                                                config.getVerifyDevice().getBucketSize(),
                                                config.getVerifyDevice().getLeakRatePerMinute());
 
+    this.turnLimiter = new RateLimiter(cacheClient, "turnAllocate",
+                                       config.getTurnAllocations().getBucketSize(),
+                                       config.getTurnAllocations().getLeakRatePerMinute());
   }
 
   public RateLimiter getAllocateDeviceLimiter() {
@@ -106,8 +116,16 @@ public class RateLimiters {
     return voiceDestinationLimiter;
   }
 
+  public RateLimiter getVoiceDestinationDailyLimiter() {
+    return voiceDestinationDailyLimiter;
+  }
+
   public RateLimiter getVerifyLimiter() {
     return verifyLimiter;
+  }
+
+  public RateLimiter getTurnLimiter() {
+    return turnLimiter;
   }
 
 }

@@ -21,8 +21,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.hibernate.validator.constraints.Length;
 import org.hibernate.validator.constraints.NotEmpty;
 
-import javax.validation.constraints.Max;
-
 public class AccountAttributes {
 
   @JsonProperty
@@ -39,19 +37,27 @@ public class AccountAttributes {
   @Length(max = 50, message = "This field must be less than 50 characters")
   private String name;
 
+  @JsonProperty
+  private boolean voice;
+
+  @JsonProperty
+  private boolean video;
+
   public AccountAttributes() {}
 
   @VisibleForTesting
   public AccountAttributes(String signalingKey, boolean fetchesMessages, int registrationId) {
-    this(signalingKey, fetchesMessages, registrationId, null);
+    this(signalingKey, fetchesMessages, registrationId, null, false, false);
   }
 
   @VisibleForTesting
-  public AccountAttributes(String signalingKey, boolean fetchesMessages, int registrationId, String name) {
+  public AccountAttributes(String signalingKey, boolean fetchesMessages, int registrationId, String name, boolean voice, boolean video) {
     this.signalingKey    = signalingKey;
     this.fetchesMessages = fetchesMessages;
     this.registrationId  = registrationId;
     this.name            = name;
+    this.voice           = voice;
+    this.video           = video;
   }
 
   public String getSignalingKey() {
@@ -69,4 +75,13 @@ public class AccountAttributes {
   public String getName() {
     return name;
   }
+
+  public boolean getVoice() {
+    return voice;
+  }
+
+  public boolean getVideo() {
+    return video;
+  }
+
 }

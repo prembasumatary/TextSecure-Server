@@ -24,7 +24,6 @@ import org.slf4j.LoggerFactory;
 import org.whispersystems.textsecuregcm.entities.IncomingMessage;
 import org.whispersystems.textsecuregcm.entities.IncomingMessageList;
 import org.whispersystems.textsecuregcm.entities.MessageProtos.Envelope;
-import org.whispersystems.textsecuregcm.entities.MessageResponse;
 import org.whispersystems.textsecuregcm.entities.MismatchedDevices;
 import org.whispersystems.textsecuregcm.entities.OutgoingMessageEntity;
 import org.whispersystems.textsecuregcm.entities.OutgoingMessageEntityList;
@@ -44,12 +43,12 @@ import org.whispersystems.textsecuregcm.storage.Device;
 import org.whispersystems.textsecuregcm.storage.MessagesManager;
 import org.whispersystems.textsecuregcm.util.Base64;
 import org.whispersystems.textsecuregcm.util.Util;
+import org.whispersystems.textsecuregcm.websocket.WebSocketConnection;
 
 import javax.validation.Valid;
 import javax.ws.rs.Consumes;
 import javax.ws.rs.DELETE;
 import javax.ws.rs.GET;
-import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.PathParam;
@@ -130,32 +129,11 @@ public class MessageController {
   }
 
   @Timed
-  @POST
-  @Consumes(MediaType.APPLICATION_JSON)
-  @Produces(MediaType.APPLICATION_JSON)
-  public MessageResponse sendMessageLegacy(@Auth Account source, @Valid IncomingMessageList messages)
-      throws IOException, RateLimitExceededException
-  {
-    try {
-      List<IncomingMessage> incomingMessages = messages.getMessages();
-      validateLegacyDestinations(incomingMessages);
-
-      messages.setRelay(incomingMessages.get(0).getRelay());
-      sendMessage(source, incomingMessages.get(0).getDestination(), messages);
-
-      return new MessageResponse(new LinkedList<String>(), new LinkedList<String>());
-    } catch (ValidationException e) {
-      throw new WebApplicationException(Response.status(422).build());
-    }
-  }
-
-  @Timed
   @GET
   @Produces(MediaType.APPLICATION_JSON)
   public OutgoingMessageEntityList getPendingMessages(@Auth Account account) {
-    return new OutgoingMessageEntityList(messagesManager.getMessagesForDevice(account.getNumber(),
-                                                                              account.getAuthenticatedDevice()
-                                                                                     .get().getId()));
+    return messagesManager.getMessagesForDevice(account.getNumber(),
+                                                account.getAuthenticatedDevice().get().getId());
   }
 
   @Timed
@@ -167,7 +145,11 @@ public class MessageController {
       throws IOException
   {
     try {
-      Optional<OutgoingMessageEntity> message = messagesManager.delete(account.getNumber(), source, timestamp);
+      WebSocketConnection.messageTime.update(System.currentTimeMillis() - timestamp);
+
+      Optional<OutgoingMessageEntity> message = messagesManager.delete(account.getNumber(),
+                                                                       account.getAuthenticatedDevice().get().getId(),
+                                                                       source, timestamp);
 
       if (message.isPresent() && message.get().getType() != Envelope.Type.RECEIPT_VALUE) {
         receiptSender.sendReceipt(account,
@@ -175,7 +157,9 @@ public class MessageController {
                                   message.get().getTimestamp(),
                                   Optional.fromNullable(message.get().getRelay()));
       }
-    } catch (NoSuchUserException | NotPushRegisteredException | TransientPushFailureException e) {
+    } catch (NotPushRegisteredException e) {
+      logger.info("User no longer push registered for delivery receipt: " + e.getMessage());
+    } catch (NoSuchUserException | TransientPushFailureException e) {
       logger.warn("Sending delivery receipt", e);
     }
   }
@@ -185,7 +169,7 @@ public class MessageController {
                                 String destinationName,
                                 IncomingMessageList messages,
                                 boolean isSyncMessage)
-      throws NoSuchUserException, MismatchedDevicesException, IOException, StaleDevicesException
+      throws NoSuchUserException, MismatchedDevicesException, StaleDevicesException
   {
     Account destination;
 
@@ -209,7 +193,7 @@ public class MessageController {
                                 Device destinationDevice,
                                 long timestamp,
                                 IncomingMessage incomingMessage)
-      throws NoSuchUserException, IOException
+      throws NoSuchUserException
   {
     try {
       Optional<byte[]> messageBody    = getMessageBody(incomingMessage);
@@ -233,13 +217,10 @@ public class MessageController {
         messageBuilder.setRelay(source.getRelay().get());
       }
 
-      pushSender.sendMessage(destinationAccount, destinationDevice, messageBuilder.build());
+      pushSender.sendMessage(destinationAccount, destinationDevice, messageBuilder.build(), incomingMessage.isSilent());
     } catch (NotPushRegisteredException e) {
       if (destinationDevice.isMaster()) throw new NoSuchUserException(e);
       else                              logger.debug("Not registered", e);
-    } catch (TransientPushFailureException e) {
-      if (destinationDevice.isMaster()) throw new IOException(e);
-      else                              logger.debug("Transient failure", e);
     }
   }
 
@@ -328,22 +309,6 @@ public class MessageController {
 
     if (!missingDeviceIds.isEmpty() || !extraDeviceIds.isEmpty()) {
       throw new MismatchedDevicesException(missingDeviceIds, extraDeviceIds);
-    }
-  }
-
-  private void validateLegacyDestinations(List<IncomingMessage> messages)
-      throws ValidationException
-  {
-    String destination = null;
-
-    for (IncomingMessage message : messages) {
-      if ((message.getDestination() == null) ||
-          (destination != null && !destination.equals(message.getDestination())))
-      {
-        throw new ValidationException("Multiple account destinations!");
-      }
-
-      destination = message.getDestination();
     }
   }
 

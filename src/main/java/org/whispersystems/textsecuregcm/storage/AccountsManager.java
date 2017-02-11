@@ -64,10 +64,12 @@ public class AccountsManager {
     return accounts.getAll();
   }
 
-  public void create(Account account) {
-    accounts.create(account);
+  public boolean create(Account account) {
+    boolean freshUser = accounts.create(account);
     memcacheSet(account.getNumber(), account);
     updateDirectory(account);
+
+    return freshUser;
   }
 
   public void update(Account account) {
@@ -100,7 +102,7 @@ public class AccountsManager {
   private void updateDirectory(Account account) {
     if (account.isActive()) {
       byte[]        token         = Util.getContactToken(account.getNumber());
-      ClientContact clientContact = new ClientContact(token, null);
+      ClientContact clientContact = new ClientContact(token, null, account.isVoiceSupported(), account.isVideoSupported());
       directory.add(clientContact);
     } else {
       directory.remove(account.getNumber());

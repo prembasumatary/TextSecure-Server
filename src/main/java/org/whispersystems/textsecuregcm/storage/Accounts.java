@@ -16,8 +16,6 @@
  */
 package org.whispersystems.textsecuregcm.storage;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.PropertyAccessor;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.skife.jdbi.v2.SQLStatement;
@@ -55,11 +53,10 @@ public abstract class Accounts {
   private static final ObjectMapper mapper = SystemMapper.getMapper();
 
   @SqlUpdate("INSERT INTO accounts (" + NUMBER + ", " + DATA + ") VALUES (:number, CAST(:data AS json))")
-  @GetGeneratedKeys
-  abstract long insertStep(@AccountBinder Account account);
+  abstract void insertStep(@AccountBinder Account account);
 
   @SqlUpdate("DELETE FROM accounts WHERE " + NUMBER + " = :number")
-  abstract void removeAccount(@Bind("number") String number);
+  abstract int removeAccount(@Bind("number") String number);
 
   @SqlUpdate("UPDATE accounts SET " + DATA + " = CAST(:data AS json) WHERE " + NUMBER + " = :number")
   abstract void update(@AccountBinder Account account);
@@ -79,10 +76,21 @@ public abstract class Accounts {
   @SqlQuery("SELECT * FROM accounts")
   public abstract Iterator<Account> getAll();
 
+  @SqlQuery("SELECT COUNT(*) FROM accounts a, json_array_elements(a.data->'devices') devices WHERE devices->>'id' = '1' AND (devices->>'gcmId') is not null AND (devices->>'lastSeen')\\:\\:bigint >= :since")
+  public abstract int getAndroidActiveSinceCount(@Bind("since") long since);
+
+  @SqlQuery("SELECT COUNT(*) FROM accounts a, json_array_elements(a.data->'devices') devices WHERE devices->>'id' = '1' AND (devices->>'apnId') is not null AND (devices->>'lastSeen')\\:\\:bigint >= :since")
+  public abstract int getIosActiveSinceCount(@Bind("since") long since);
+
+  @SqlQuery("SELECT count(*) FROM accounts a, json_array_elements(a.data->'devices') devices WHERE devices->>'id' = '1' AND (devices->>'lastSeen')\\:\\:bigint >= :since AND (devices->>'signedPreKey') is null AND (devices->>'gcmId') is not null")
+  public abstract int getUnsignedKeysCount(@Bind("since") long since);
+
   @Transaction(TransactionIsolationLevel.SERIALIZABLE)
-  public long create(Account account) {
-    removeAccount(account.getNumber());
-    return insertStep(account);
+  public boolean create(Account account) {
+    int rows = removeAccount(account.getNumber());
+    insertStep(account);
+
+    return rows == 0;
   }
 
   @SqlUpdate("VACUUM accounts")

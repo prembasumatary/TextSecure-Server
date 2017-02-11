@@ -19,6 +19,9 @@ package org.whispersystems.textsecuregcm.configuration;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import org.hibernate.validator.constraints.NotEmpty;
 
+import javax.validation.constraints.NotNull;
+import java.util.List;
+
 public class TwilioConfiguration {
 
   @NotEmpty
@@ -29,16 +32,16 @@ public class TwilioConfiguration {
   @JsonProperty
   private String accountToken;
 
-  @NotEmpty
+  @NotNull
   @JsonProperty
-  private String number;
+  private List<String> numbers;
 
   @NotEmpty
   @JsonProperty
   private String localDomain;
 
   @JsonProperty
-  private boolean international;
+  private String messagingServicesId;
 
   public String getAccountId() {
     return accountId;
@@ -48,15 +51,15 @@ public class TwilioConfiguration {
     return accountToken;
   }
 
-  public String getNumber() {
-    return number;
+  public List<String> getNumbers() {
+    return numbers;
   }
 
   public String getLocalDomain() {
     return localDomain;
   }
 
-  public boolean isInternational() {
-    return international;
+  public String getMessagingServicesId() {
+    return messagingServicesId;
   }
 }

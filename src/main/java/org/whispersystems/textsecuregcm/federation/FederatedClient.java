@@ -25,6 +25,7 @@ import org.apache.http.conn.ssl.DefaultHostnameVerifier;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
 import org.bouncycastle.openssl.PEMReader;
 import org.glassfish.jersey.client.ClientProperties;
+import org.glassfish.jersey.client.RequestEntityProcessing;
 import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -168,38 +169,48 @@ public class FederatedClient {
   public void sendMessages(String source, long sourceDeviceId, String destination, IncomingMessageList messages)
       throws IOException
   {
+    Response response = null;
+
     try {
-      Response response = client.target(peer.getUrl())
-                                .path(String.format(RELAY_MESSAGE_PATH, source, sourceDeviceId, destination))
-                                .request()
-                                .put(Entity.entity(messages, MediaType.APPLICATION_JSON_TYPE));
+      response = client.target(peer.getUrl())
+                       .path(String.format(RELAY_MESSAGE_PATH, source, sourceDeviceId, destination))
+                       .request()
+                       .put(Entity.json(messages));
 
       if (response.getStatus() != 200 && response.getStatus() != 204) {
-        throw new WebApplicationException(response);
+        if (response.getStatus() == 411) throw new WebApplicationException(Response.status(413).build());
+        else                             throw new WebApplicationException(Response.status(response.getStatusInfo()).build());
       }
 
     } catch (ProcessingException e) {
       logger.warn("sendMessage", e);
       throw new IOException(e);
+    } finally {
+      if (response != null) response.close();
     }
   }
 
   public void sendDeliveryReceipt(String source, long sourceDeviceId, String destination, long messageId)
       throws IOException
   {
+    Response response = null;
+
     try {
-      Response response = client.target(peer.getUrl())
-                                .path(String.format(RECEIPT_PATH, source, sourceDeviceId, destination, messageId))
-                                .request()
-                                .property(ClientProperties.SUPPRESS_HTTP_COMPLIANCE_VALIDATION, true)
-                                .put(null);
+      response = client.target(peer.getUrl())
+                       .path(String.format(RECEIPT_PATH, source, sourceDeviceId, destination, messageId))
+                       .request()
+                       .property(ClientProperties.SUPPRESS_HTTP_COMPLIANCE_VALIDATION, true)
+                       .put(Entity.entity("", MediaType.APPLICATION_JSON_TYPE));
 
       if (response.getStatus() != 200 && response.getStatus() != 204) {
-        throw new WebApplicationException(response);
+        if (response.getStatus() == 411) throw new WebApplicationException(Response.status(413).build());
+        else                             throw new WebApplicationException(Response.status(response.getStatusInfo()).build());
       }
     } catch (ProcessingException e) {
       logger.warn("sendMessage", e);
       throw new IOException(e);
+    } finally {
+      if (response != null) response.close();
     }
   }
 
@@ -222,6 +233,7 @@ public class FederatedClient {
 
     client.property(ClientProperties.CONNECT_TIMEOUT, 5000);
     client.property(ClientProperties.READ_TIMEOUT, 10000);
+    client.property(ClientProperties.REQUEST_ENTITY_PROCESSING, RequestEntityProcessing.BUFFERED);
     client.register(HttpAuthenticationFeature.basic(federationName, peer.getAuthenticationToken()));
 
     return client;

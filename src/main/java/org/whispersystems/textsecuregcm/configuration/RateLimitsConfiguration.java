@@ -27,6 +27,9 @@ public class RateLimitsConfiguration {
   private RateLimitConfiguration voiceDestination = new RateLimitConfiguration(2, 1.0 / 2.0);
 
   @JsonProperty
+  private RateLimitConfiguration voiceDestinationDaily = new RateLimitConfiguration(10, 10.0 / (24.0 * 60.0));
+
+  @JsonProperty
   private RateLimitConfiguration verifyNumber = new RateLimitConfiguration(2, 2);
 
   @JsonProperty
@@ -46,6 +49,9 @@ public class RateLimitsConfiguration {
 
   @JsonProperty
   private RateLimitConfiguration verifyDevice = new RateLimitConfiguration(2, 2);
+
+  @JsonProperty
+  private RateLimitConfiguration turnAllocations = new RateLimitConfiguration(60, 60);
 
   public RateLimitConfiguration getAllocateDevice() {
     return allocateDevice;
@@ -79,8 +85,16 @@ public class RateLimitsConfiguration {
     return voiceDestination;
   }
 
+  public RateLimitConfiguration getVoiceDestinationDaily() {
+    return voiceDestinationDaily;
+  }
+
   public RateLimitConfiguration getVerifyNumber() {
     return verifyNumber;
+  }
+
+  public RateLimitConfiguration getTurnAllocations() {
+    return turnAllocations;
   }
 
   public static class RateLimitConfiguration {

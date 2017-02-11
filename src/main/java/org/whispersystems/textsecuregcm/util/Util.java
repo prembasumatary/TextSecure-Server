@@ -20,6 +20,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -42,7 +43,11 @@ public class Util {
   }
 
   public static boolean isValidNumber(String number) {
-    return number.matches("^\\+[0-9]{10,}");
+    return number.matches("^\\+[0-9]{10,}")  ||
+           number.matches("^\\+298[0-9]{6}") ||
+           number.matches("^\\+240[0-9]{6}") ||
+           number.matches("^\\+687[0-9]{6}") ||
+           number.matches("^\\+689[0-9]{6}");
   }
 
   public static String encodeFormParams(Map<String, String> params) {
@@ -127,6 +132,10 @@ public class Util {
     } catch (InterruptedException e) {
       throw new AssertionError(e);
     }
+  }
+
+  public static int hashCode(Object... objects) {
+    return Arrays.hashCode(objects);
   }
 
   public static long todayInMillis() {

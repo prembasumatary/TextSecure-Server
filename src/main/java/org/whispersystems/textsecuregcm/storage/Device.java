@@ -70,13 +70,23 @@ public class Device {
   @JsonProperty
   private long created;
 
+  @JsonProperty
+  private boolean voice;
+
+  @JsonProperty
+  private boolean video;
+
+  @JsonProperty
+  private String userAgent;
+
   public Device() {}
 
   public Device(long id, String name, String authToken, String salt,
                 String signalingKey, String gcmId, String apnId,
                 String voipApnId, boolean fetchesMessages,
                 int registrationId, SignedPreKey signedPreKey,
-                long lastSeen, long created)
+                long lastSeen, long created, boolean voice, boolean video,
+                String userAgent)
   {
     this.id              = id;
     this.name            = name;
@@ -91,6 +101,9 @@ public class Device {
     this.signedPreKey    = signedPreKey;
     this.lastSeen        = lastSeen;
     this.created         = created;
+    this.voice           = voice;
+    this.video           = video;
+    this.userAgent       = userAgent;
   }
 
   public String getApnId() {
@@ -157,6 +170,22 @@ public class Device {
     this.name = name;
   }
 
+  public boolean isVoiceSupported() {
+    return voice;
+  }
+
+  public void setVoiceSupported(boolean voice) {
+    this.voice = voice;
+  }
+
+  public boolean isVideoSupported() {
+    return video;
+  }
+
+  public void setVideoSupported(boolean video) {
+    this.video = video;
+  }
+
   public void setAuthenticationCredentials(AuthenticationCredentials credentials) {
     this.authToken = credentials.getHashedAuthenticationToken();
     this.salt      = credentials.getSalt();
@@ -177,7 +206,7 @@ public class Device {
   public boolean isActive() {
     boolean hasChannel = fetchesMessages || !Util.isEmpty(getApnId()) || !Util.isEmpty(getGcmId());
 
-    return (id == MASTER_ID && hasChannel) ||
+    return (id == MASTER_ID && hasChannel && signedPreKey != null) ||
            (id != MASTER_ID && hasChannel && signedPreKey != null && lastSeen > (System.currentTimeMillis() - TimeUnit.DAYS.toMillis(30)));
   }
 
@@ -211,6 +240,14 @@ public class Device {
 
   public long getPushTimestamp() {
     return pushTimestamp;
+  }
+
+  public void setUserAgent(String userAgent) {
+    this.userAgent = userAgent;
+  }
+
+  public String getUserAgent() {
+    return this.userAgent;
   }
 
   @Override

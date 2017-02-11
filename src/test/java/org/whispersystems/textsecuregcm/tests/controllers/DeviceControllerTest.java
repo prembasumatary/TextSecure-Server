@@ -30,6 +30,7 @@ import org.whispersystems.textsecuregcm.limits.RateLimiters;
 import org.whispersystems.textsecuregcm.mappers.DeviceLimitExceededExceptionMapper;
 import org.whispersystems.textsecuregcm.storage.Account;
 import org.whispersystems.textsecuregcm.storage.AccountsManager;
+import org.whispersystems.textsecuregcm.storage.MessagesManager;
 import org.whispersystems.textsecuregcm.storage.PendingDevicesManager;
 import org.whispersystems.textsecuregcm.tests.util.AuthHelper;
 import org.whispersystems.textsecuregcm.util.VerificationCode;
@@ -48,8 +49,12 @@ import static org.mockito.Mockito.*;
 public class DeviceControllerTest {
   @Path("/v1/devices")
   static class DumbVerificationDeviceController extends DeviceController {
-    public DumbVerificationDeviceController(PendingDevicesManager pendingDevices, AccountsManager accounts, RateLimiters rateLimiters) {
-      super(pendingDevices, accounts, rateLimiters);
+    public DumbVerificationDeviceController(PendingDevicesManager pendingDevices,
+                                            AccountsManager accounts,
+                                            MessagesManager messages,
+                                            RateLimiters rateLimiters)
+    {
+      super(pendingDevices, accounts, messages, rateLimiters);
     }
 
     @Override
@@ -60,6 +65,7 @@ public class DeviceControllerTest {
 
   private PendingDevicesManager pendingDevicesManager = mock(PendingDevicesManager.class);
   private AccountsManager       accountsManager       = mock(AccountsManager.class       );
+  private MessagesManager       messagesManager       = mock(MessagesManager.class);
   private RateLimiters          rateLimiters          = mock(RateLimiters.class          );
   private RateLimiter           rateLimiter           = mock(RateLimiter.class           );
   private Account               account               = mock(Account.class               );
@@ -74,6 +80,7 @@ public class DeviceControllerTest {
                                                             .addProvider(new ConstraintViolationExceptionMapper())
                                                             .addResource(new DumbVerificationDeviceController(pendingDevicesManager,
                                                                                                               accountsManager,
+                                                                                                              messagesManager,
                                                                                                               rateLimiters))
                                                             .build();
 
@@ -87,7 +94,7 @@ public class DeviceControllerTest {
     when(rateLimiters.getVerifyDeviceLimiter()).thenReturn(rateLimiter);
 
     when(account.getNextDeviceId()).thenReturn(42L);
-    when(maxedAccount.getActiveDeviceCount()).thenReturn(3);
+//    when(maxedAccount.getActiveDeviceCount()).thenReturn(6);
 
     when(pendingDevicesManager.getCodeForNumber(AuthHelper.VALID_NUMBER)).thenReturn(Optional.of("5678901"));
     when(pendingDevicesManager.getCodeForNumber(AuthHelper.VALID_NUMBER_TWO)).thenReturn(Optional.of("1112223"));
@@ -126,7 +133,7 @@ public class DeviceControllerTest {
                                  .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_NUMBER_TWO, AuthHelper.VALID_PASSWORD_TWO))
                                  .get();
 
-    assertEquals(response.getStatus(), 411);
+    assertEquals(411, response.getStatus());
   }
 
   @Test
@@ -135,7 +142,7 @@ public class DeviceControllerTest {
                                  .target("/v1/devices/5678901")
                                  .request()
                                  .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_NUMBER, "password1"))
-                                 .put(Entity.entity(new AccountAttributes("keykeykeykey", false, 1234, "this is a really long name that is longer than 80 characters"),
+                                 .put(Entity.entity(new AccountAttributes("keykeykeykey", false, 1234, "this is a really long name that is longer than 80 characters", true, true),
                                                     MediaType.APPLICATION_JSON_TYPE));
 
     assertEquals(response.getStatus(), 422);

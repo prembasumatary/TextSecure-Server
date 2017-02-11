@@ -74,13 +74,13 @@ public class MessageControllerTest {
   @Before
   public void setup() throws Exception {
     Set<Device> singleDeviceList = new HashSet<Device>() {{
-      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 111, null, System.currentTimeMillis(), System.currentTimeMillis()));
+      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 111, new SignedPreKey(333, "baz", "boop"), System.currentTimeMillis(), System.currentTimeMillis(), false, false, "Test"));
     }};
 
     Set<Device> multiDeviceList = new HashSet<Device>() {{
-      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 222, new SignedPreKey(111, "foo", "bar"), System.currentTimeMillis(), System.currentTimeMillis()));
-      add(new Device(2, null, "foo", "bar", "baz", "isgcm", null, null, false, 333, new SignedPreKey(222, "oof", "rab"), System.currentTimeMillis(), System.currentTimeMillis()));
-      add(new Device(3, null, "foo", "bar", "baz", "isgcm", null, null, false, 444, null, System.currentTimeMillis() - TimeUnit.DAYS.toMillis(31), System.currentTimeMillis()));
+      add(new Device(1, null, "foo", "bar", "baz", "isgcm", null, null, false, 222, new SignedPreKey(111, "foo", "bar"), System.currentTimeMillis(), System.currentTimeMillis(), false, false, "Test"));
+      add(new Device(2, null, "foo", "bar", "baz", "isgcm", null, null, false, 333, new SignedPreKey(222, "oof", "rab"), System.currentTimeMillis(), System.currentTimeMillis(), false, false, "Test"));
+      add(new Device(3, null, "foo", "bar", "baz", "isgcm", null, null, false, 444, null, System.currentTimeMillis() - TimeUnit.DAYS.toMillis(31), System.currentTimeMillis(), false, false, "Test"));
     }};
 
     Account singleDeviceAccount = new Account(SINGLE_DEVICE_RECIPIENT, singleDeviceList);
@@ -91,21 +91,7 @@ public class MessageControllerTest {
 
     when(rateLimiters.getMessagesLimiter()).thenReturn(rateLimiter);
   }
-
-  @Test
-  public synchronized void testSingleDeviceLegacy() throws Exception {
-    Response response =
-        resources.getJerseyTest().target("/v1/messages/")
-                 .request()
-                 .header("Authorization", AuthHelper.getAuthHeader(AuthHelper.VALID_NUMBER, AuthHelper.VALID_PASSWORD))
-                 .post(Entity.entity(mapper.readValue(jsonFixture("fixtures/legacy_message_single_device.json"), IncomingMessageList.class),
-                                     MediaType.APPLICATION_JSON_TYPE));
-
-    assertThat("Good Response", response.getStatus(), is(equalTo(200)));
-
-    verify(pushSender, times(1)).sendMessage(any(Account.class), any(Device.class), any(Envelope.class));
-  }
-
+  
   @Test
   public synchronized void testSingleDeviceCurrent() throws Exception {
     Response response =
@@ -118,7 +104,7 @@ public class MessageControllerTest {
 
     assertThat("Good Response", response.getStatus(), is(equalTo(200)));
 
-    verify(pushSender, times(1)).sendMessage(any(Account.class), any(Device.class), any(Envelope.class));
+    verify(pushSender, times(1)).sendMessage(any(Account.class), any(Device.class), any(Envelope.class), eq(false));
   }
 
   @Test
@@ -171,7 +157,7 @@ public class MessageControllerTest {
 
     assertThat("Good Response Code", response.getStatus(), is(equalTo(200)));
 
-    verify(pushSender, times(2)).sendMessage(any(Account.class), any(Device.class), any(Envelope.class));
+    verify(pushSender, times(2)).sendMessage(any(Account.class), any(Device.class), any(Envelope.class), eq(false));
   }
 
   @Test
@@ -204,7 +190,9 @@ public class MessageControllerTest {
       add(new OutgoingMessageEntity(2L, Envelope.Type.RECEIPT_VALUE, null, timestampTwo, "+14152222222", 2, null, null));
     }};
 
-    when(messagesManager.getMessagesForDevice(eq(AuthHelper.VALID_NUMBER), eq(1L))).thenReturn(messages);
+    OutgoingMessageEntityList messagesList = new OutgoingMessageEntityList(messages, false);
+
+    when(messagesManager.getMessagesForDevice(eq(AuthHelper.VALID_NUMBER), eq(1L))).thenReturn(messagesList);
 
     OutgoingMessageEntityList response =
         resources.getJerseyTest().target("/v1/messages/")
@@ -226,20 +214,20 @@ public class MessageControllerTest {
   @Test
   public synchronized void testDeleteMessages() throws Exception {
     long timestamp = System.currentTimeMillis();
-    when(messagesManager.delete(AuthHelper.VALID_NUMBER, "+14152222222", 31337))
+    when(messagesManager.delete(AuthHelper.VALID_NUMBER, 1, "+14152222222", 31337))
         .thenReturn(Optional.of(new OutgoingMessageEntity(31337L,
                                                           Envelope.Type.CIPHERTEXT_VALUE,
                                                           null, timestamp,
                                                           "+14152222222", 1, "hi".getBytes(), null)));
 
-    when(messagesManager.delete(AuthHelper.VALID_NUMBER, "+14152222222", 31338))
+    when(messagesManager.delete(AuthHelper.VALID_NUMBER, 1, "+14152222222", 31338))
         .thenReturn(Optional.of(new OutgoingMessageEntity(31337L,
                                                           Envelope.Type.RECEIPT_VALUE,
                                                           null, System.currentTimeMillis(),
                                                           "+14152222222", 1, null, null)));
 
 
-    when(messagesManager.delete(AuthHelper.VALID_NUMBER, "+14152222222", 31339))
+    when(messagesManager.delete(AuthHelper.VALID_NUMBER, 1, "+14152222222", 31339))
         .thenReturn(Optional.<OutgoingMessageEntity>absent());
 
     Response response = resources.getJerseyTest()
